@@ -1,2 +1,2 @@
-# spotify-rapt
+# Spotify Rapt
 Spotify Wrapped, my version
