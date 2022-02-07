@@ -10,6 +10,7 @@ matplotlib = "*"
 spotipy = "*"
 notebook = "*"
 nbconvert = "*"
+streamlit = "*"
 
 [dev-packages]
 
