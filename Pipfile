@@ -10,7 +10,8 @@ matplotlib = "*"
 spotipy = "*"
 notebook = "*"
 nbconvert = "*"
-streamlit = "*"
+flask = "*"
+requests-oauthlib = "*"
 
 [dev-packages]
 
