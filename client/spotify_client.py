@@ -1,119 +1,59 @@
 import base64
 import os
+import webbrowser
+from abc import ABC, abstractmethod, abstractproperty
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
-from client.spotify_auth import ClientAuth
 
+class SpotifyClient:
+    BASE_URL = "https://api.spotify.com/v1"
 
-class SpotifyAPI:
-    base_url = "https://api.spotify.com/v1/"
-    # client_id = None
-    # client_secret = None
-    # redirect_uri = None
-    # auth_manager = None
-    # access_token = None
-    access_token_expiry = datetime.now()
-    access_token_expired = True
-    refresh_token = None
-    refresh_token_expired = True
+    def __init__(
+        self, client_id, client_secret, redirect_uri=None, scope=None, state=None
+    ):
+        self._auth_manager = AuthManager(client_id, client_secret, redirect_uri, scope)
 
-    def __init__(self, client_id, client_secret):
-        """
-        Initialises the Spotify client with the client ID and secret, using the Client Credentials flow
-        """
-        self.client_id = client_id
-        self.client_secret = client_secret
+    @property
+    def client_credentials(self):
+        client_credentials = f"{self._client_id}:{self._client_secret}"
+        self._client_credentials = base64.b64encode(client_credentials.encode())
+        return self._client_credentials.decode()
 
-    def __init__(self, client_id, client_secret, redirect_uri):
-        """
-        Initialises the Spotify client with client id, secret and redirect uri, using the Authorisation Code flow
-        """
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.redirect_uri = redirect_uri
+    @property
+    def token_info(self):
+        return self._token_info
+
+    @token_info.setter
+    def token_info(self, val):
+        # Assert if this is a valid token?
+        self._token_info = val
 
     @property
     def auth_manager(self):
         return self._auth_manager
 
-    @property.setter
-    def auth_manager(self, AuthManager):
-        """
-        Authorising client using the client credentials flow or OAuth flow depending on the presence of a redirect URI
-        """
-        if self.redirect_uri is None:
-            self._auth_manager = ClientAuth(self.client_id, self.client_secret)
-        else:
-            self._auth_manager = OAuth(
-                self.client_id, self.client_secret, self.redirect_uri
-            )
+    @auth_manager.setter
+    def auth_manager(self, val):
+        if isinstance(val, AuthManager):
+            self._auth_manager = val
+
+    def authorise(self):
+        self.token_info = self.auth_manager.request_token()
 
     @property
-    def access_token(self):
-        self._access_token = self._auth_manager.get_access_token()
-
-    @property
-    def access_token_expiry(self):
-        now = datetime.now()
-        expires_in = self._auth_manager.get_token_expires_in()["expires_in"]
-        self._access_token_expiry = now + timedelta(expires_in)
-
-    # def authorise(self):
-    #     self.access_token
-
-    # def authorise(self):
-    #     """
-    #     Authorises the client, setting the authorisation token and returning True if successful
-    #     """
-    #     auth_url = self.auth_url
-    #     auth_data = self.get_token_data()
-    #     auth_headers = self.get_token_header()
-    #     auth_response = requests.post(auth_url, data=auth_data, headers=auth_headers)
-    #     if auth_response.status_code not in range(200, 299):
-    #         raise Exception("Could not authenticate client")
-    #         return False
-    #     auth_response_data = auth_response.json()
-    #     self.access_token = auth_response_data["access_token"]
-    #     now = datetime.now()
-    #     expires_in = auth_response_data["expires_in"]
-    #     expires = now + timedelta(seconds=expires_in)
-    #     self.access_token_expires = expires
-    #     self.access_token_expired = expires < now
-    #     return True
-
-    # def get_access_token(self):
-    #     """
-    #     Returns access token if expired
-    #     """
-    #     token = self.access_token
-    #     expiry = self.access_token_expiry
-    #     now = datetime.now()
-    #     if expiry < now:
-    #         self.authorise()
-    #         return self.access_token
-    #     elif token is None:
-    #         self.authorise()
-    #         return self.access_token
-    #     return token
-
-    # def get_resource_header(self):
-    #     """
-    #     Returns headers including authorisation header derived from access token
-    #     """
-    #     access_token = self.get_access_token()
-    #     headers = {"Authorization": f"Bearer {access_token}"}
-    #     return headers
+    def resource_headers(self):
+        access_token = self.token_info.get("access_token")
+        return {"Authorization": f"Bearer {access_token}"}
 
     def get_resource(self, lookup_id, resource_type="albums"):
         """
-        Returns resource based on lookup ID, for resource types artists, albums, tracks etc.
+        Returns resource based on lookup ID, for artists, albums and tracks (so far)
         """
-        base_url = self.base_url
-        endpoint = f"{base_url}{resource_type}/{lookup_id}"
-        headers = self.get_resource_header()
+        endpoint = f"{self.BASE_URL}/{resource_type}/{lookup_id}"
+        headers = self.resource_headers
         r = requests.get(endpoint, headers=headers)
         if r.status_code not in range(200, 299):
             return {}
@@ -121,13 +61,13 @@ class SpotifyAPI:
 
     def get_album(self, _id):
         """
-        Returns single album resource in JSON format
+        Returns a single album resource
         """
         return self.get_resource(_id, "albums")
 
     def get_artist(self, _id):
         """
-        Returns single artist resource in JSON format
+        Returns a single artist resource
         """
         return self.get_resource(_id, "artists")
 
@@ -135,9 +75,8 @@ class SpotifyAPI:
         """
         Performs basic search using query parameters
         """
-        base_url = self.base_url
-        endpoint = f"{base_url}search"
-        headers = self.get_resource_header()
+        endpoint = f"{self.BASE_URL}/search"
+        headers = self.resource_headers
         url = f"{endpoint}?{query_params}"
         r = requests.get(url, headers=headers)
         if r.status_code not in range(200, 299):
@@ -170,3 +109,134 @@ class SpotifyAPI:
         if r.status_code not in range(200, 299):
             return {}
         return r.json()
+
+
+class AuthManager:
+    TOKEN_URL = "https://accounts.spotify.com/api/token"
+    AUTH_URL = "https://accounts.spotify.com/authorize"
+
+    def __init__(
+        self, client_id, client_secret, redirect_uri=None, scope=None, state=None
+    ):
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._redirect_uri = redirect_uri
+        self._scope = scope
+        self._state = state
+
+    @property
+    def client_id(self):
+        return self._client_id
+
+    @property
+    def client_secret(self):
+        return self._client_secret
+
+    @property
+    def redirect_uri(self):
+        return self._redirect_uri
+
+    @property
+    def scope(self):
+        return self._scope
+
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def client_credentials(self):
+        client_credentials = f"{self._client_id}:{self._client_secret}"
+        self._client_credentials = base64.b64encode(client_credentials.encode())
+        return self._client_credentials.decode()
+
+    @property
+    def redirect_uri(self):
+        return self._redirect_uri
+
+    # Add setter for scope and validate
+    @property
+    def scope(self):
+        return self._scope
+
+    @property
+    def grant_type(self):
+        if not self._redirect_uri:
+            return {"grant_type": "client_credentials"}
+        return {"grant_type": "authorization_code"}
+
+    @property
+    def basic_auth(self):
+        return {"Authorization": f"Basic {self.client_credentials}"}
+
+    @property
+    def content_type(self):
+        return {"content_type": "application/x-www-form-urlencoded"}
+
+    @property
+    def token_data(self):
+        return {
+            "code": self.code,
+            "state": self.state,
+            "redirect_uri": self.redirect_uri,
+        } | self.grant_type
+
+    # Change this to just be auth when merging the basic and bearer auth tokens
+    @property
+    def token_headers(self):
+        return self.basic_auth | self.content_type
+
+    @property
+    def auth_url(self):
+        query = {
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+        }
+        if self.scope:
+            query["scope"] = self.scope
+        if self.state is None:
+            query["state"] = self.state
+        # if self.show_dialog:
+        #     payload["show_dialog"] = True
+        urlparams = urlencode(query)
+        return f"{self.AUTH_URL}?{urlparams}"
+
+    def authorise(self):
+        url = webbrowser.open(self.auth_url)
+        print(url)
+        # _, code = AuthManager.parse_auth_url(url)
+
+    def request_token(self, code=None):
+        url = self.TOKEN_URL
+        data = self.token_data
+        # if code is not None:
+        #     data = data | {"code":code, "redirect_uri":self.redirect_uri}
+        headers = self.token_headers
+        print(url, data, headers)
+        r = requests.post(url, data=data, headers=headers)
+        if r.status_code not in range(200, 299):
+            raise Exception(
+                f"Could not authenticate user, please try again. Error code: {r.status_code}"
+            )
+        return r.json()
+
+    @staticmethod
+    def parse_auth_url(url):
+        query = urlparse(url).query
+        form = parse_qs(query)
+        if "error" in form:
+            raise Exception("Error authorising user")
+        return tuple(form.get(param) for param in ["state", "code"])
+
+    @property
+    def code(self):
+        return self._code
+
+    @code.setter
+    def code(self, val):
+        self._code = val
+
+    @property
+    def state(self):
+        return self._state

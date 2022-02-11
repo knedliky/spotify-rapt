@@ -1,8 +1,8 @@
 import os
 
-from flask import Flask, request
+from flask import Flask, render_template, request
 
-from client.oauth import *
+from client import spotify_client
 
 app = Flask(__name__)
 
@@ -13,11 +13,11 @@ redirect_uri = os.getenv("REDIRECT_URI")
 
 @app.route("/")
 def home():
-    return "Hello, Flask!"
+    return render_template("index.html")
 
 
 @app.route("/callback", methods=["GET", "POST"])
-def spotify_callback():
+def callback():
     args = request.args
     code = args.get("code")
     return f"The code payload is {code}!"

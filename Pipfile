@@ -12,6 +12,9 @@ notebook = "*"
 nbconvert = "*"
 flask = "*"
 requests-oauthlib = "*"
+aiohttp = "*"
+asyncio = "*"
+streamlit = "*"
 
 [dev-packages]
 
